@@ -1,5 +1,5 @@
 #!/bin/sh
-# Version: 30 August 2014
+# Version: 11 January 2015
 # exit codes are taken from /usr/include/sysexits.h
 export DISPLAY=:0
 
@@ -19,17 +19,17 @@ delete_error_logfile_interval=30
 # Set logfile path.
 # If the single_logfile setting is false, use a log file per backup.
 # Otherwise, use a single log file for all backups.
-if [ "${single_logfile}" == 'false' ]
+if [ "${single_logfile}" = 'false' ]
 then
   logdir="${script_dir}/log"
-  
+
   # Create log directory if it doesn't exist.
-    if [ ! -d "${logdir}" ]
-    then
-      mkdir ${logdir}
-      mkdir ${logdir}/error
-    fi
-  
+  if [ ! -d "${logdir}" ]
+  then
+    mkdir "${logdir}"
+    mkdir "${logdir}/error"
+  fi
+
   logfile="${logdir}/backup-${date}.log"
 else
   logdir="${script_dir}"
@@ -40,13 +40,13 @@ fi
 # then exits with error code.
 move_log_exit()
 {
-  # If multiple log files are being used, move the current log file to the 
+  # If multiple log files are being used, move the current log file to the
   # error folder.
-  if [ "${single_logfile}" == 'false' ]
+  if [ "${single_logfile}" = 'false' ]
   then
     mv "${logfile}" "${logdir}/error/"
   fi
-  
+
   exit ${1}
 }
 
@@ -108,11 +108,15 @@ then
   exec 2>>"${logfile}" # Append all errors to the log, this also prevents output during cron run.
 fi
 
-handle_message '-- Backup script started' 'Backup script started'
+handle_message '-- Backup script started'
 handle_message "Command line: ${0} ${*}"
 
 # backups are placed in a subfolder name $identifier, the identifier is also used as a lockfile
-identifier=`/bin/hostname`
+
+if [ -z "${identifier}" ]
+then
+  identifier=`/bin/hostname`
+fi
 
 # Check and create lockfile, the identifier is used as a name for the lockfile
 lockfile="${script_dir}/${identifier}.lck"
@@ -213,14 +217,14 @@ handle_message "Rotation folders exists, starting backup to '${target}${date}-in
 # Make the actual backup, note: the first time this is run, the latest folder
 # can't be found. rsync will display this but will proceed.
 verbosity='quiet'
-log_to_file=''
+log_to_file="--log-file='${logfile}'"
 if [ ${verbose} = 1 ]
 then
   verbosity='verbose'
-  
+
   # Log RSync output to the log file to diagnose RSync errors during automated
   # back up jobs.
-  log_to_file='--log-file=${logfile} --stats'
+  log_to_file="${log_to_file} --stats"
 fi
 
 # If the previous backup was interrupted, try to link against its files first.
@@ -233,7 +237,7 @@ latest_incomplete=`${ssh_executable} -f -p ${ssh_port} ${ssh_connect} "find ${ta
 if ${ssh_executable} -p ${ssh_port} ${ssh_connect} "[ ! -z ${latest_incomplete} ]"
 then
   handle_message "Incomplete folder exists from previous backup attempt. Continuing backup from that attempt."
-  
+
   # RSync will try first to link against files in this location when searching
   # for matches during backup. If it does not find the file here, it will then
   # try to link against files in the latest complete backup folder.
@@ -371,7 +375,9 @@ done
 handle_message 'Old backups deleted, deleting any remaining incomplete folders.'
 
 # Remove any remaining incomplete folders at target, those belong to ghost processes.
-${ssh_executable} -p ${ssh_port} ${ssh_connect} "find '${target}' -type d -maxdepth 1 -name '*incomplete' -exec rm -rf {} +"
+# NB Replacing '{} \;' with '{} +' would be faster but it isn't set like that so
+#    the script is compatible with Synology Diskstation
+${ssh_executable} -p ${ssh_port} ${ssh_connect} "find '${target}' -type d -maxdepth 1 -name '*incomplete' -exec rm -rf {} \;"
 
 if [ $? = 0 ]
 then
@@ -392,17 +398,19 @@ else
   move_log_exit 74 # input/output error
 fi
 
-handle_message "-- Backup to '${target}hourly/${date}' finished" 'Backup script finished'
-
 # Delete old log files if in multiple log file mode.
-if [ "${single_logfile}" == 'false' ]
+if [ "${single_logfile}" = 'false' ]
 then
+  handle_message "Multiple log file mode; clean up logs in '${logdir}'."
+
   # Delete successful log files older than a week.
-  find ${logdir} -maxdepth 1 -type f -mtime +${delete_logfile_interval} | xargs rm -f
-  
+  find "${logdir}" -maxdepth 1 -type f -mtime +${delete_logfile_interval} | xargs rm -f
+
   # Delete error log files older than a month.
-  find ${logdir}/error -maxdepth 1 -type f -mtime +${delete_error_logfile_interval} | xargs rm -f
+  find "${logdir}/error" -maxdepth 1 -type f -mtime +${delete_error_logfile_interval} | xargs rm -f
 fi
+
+handle_message "-- Backup to '${target}hourly/${date}' finished; backup script finished"
 
 exit 0; # successful termination
 
